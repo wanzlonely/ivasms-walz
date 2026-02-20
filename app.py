@@ -9,6 +9,10 @@ import gzip
 from io import BytesIO
 import brotli
 
+# --- TAMBAHAN: Import file bot.py ---
+import bot as telegram_bot 
+# ------------------------------------
+
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
@@ -39,10 +43,10 @@ class IVASSMSClient:
         content = response.content
         try:
             if encoding == 'gzip':
-                logger.debug("Decompressing gzip response")
+                # logger.debug("Decompressing gzip response")
                 content = gzip.decompress(content)
             elif encoding == 'br':
-                logger.debug("Decompressing brotli response")
+                # logger.debug("Decompressing brotli response")
                 content = brotli.decompress(content)
             return content.decode('utf-8', errors='replace')
         except Exception as e:
@@ -107,9 +111,7 @@ class IVASSMSClient:
                     logger.debug(f"Logged in successfully with CSRF token: {self.csrf_token}")
                     return True
                 else:
-                    logger.error("Could not find CSRF token. Dumping response HTML for debugging:")
-                    logger.error(f"Response HTML (first 2000 chars): {html_content[:2000]}")
-                    logger.error(f"Full response length: {len(html_content)}")
+                    logger.error("Could not find CSRF token.")
                     return False
             logger.error(f"Login failed with status code: {response.status_code}")
             return False
@@ -118,22 +120,11 @@ class IVASSMSClient:
             return False
 
     def check_otps(self, from_date="", to_date=""):
-        if not self.logged_in:
-            logger.error("Not logged in")
-            return None
+        if not self.logged_in: return None
+        if not self.csrf_token: return None
         
-        if not self.csrf_token:
-            logger.error("No CSRF token available")
-            return None
-        
-        logger.debug(f"Checking OTPs from {from_date} to {to_date}")
         try:
-            payload = {
-                'from': from_date,
-                'to': to_date,
-                '_token': self.csrf_token
-            }
-            
+            payload = {'from': from_date, 'to': to_date, '_token': self.csrf_token}
             headers = {
                 'Accept': 'text/html, */*; q=0.01',
                 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
@@ -144,13 +135,10 @@ class IVASSMSClient:
             
             response = self.scraper.post(
                 f"{self.base_url}/portal/sms/received/getsms",
-                data=payload,
-                headers=headers,
-                timeout=10
+                data=payload, headers=headers, timeout=10
             )
             
             if response.status_code == 200:
-                logger.debug("Successfully retrieved SMS data")
                 html_content = self.decompress_response(response)
                 soup = BeautifulSoup(html_content, 'html.parser')
                 
@@ -164,16 +152,13 @@ class IVASSMSClient:
                 for item in items:
                     country_number = item.select_one(".col-sm-4").text.strip()
                     count = item.select_one(".col-3:nth-child(2) p").text.strip()
-                    paid = item.select_one(".col-3:nth-child(3) p").text.strip()
-                    unpaid = item.select_one(".col-3:nth-child(4) p").text.strip()
-                    revenue = item.select_one(".col-3:nth-child(5) p span.currency_cdr").text.strip()
                     
                     sms_details.append({
                         'country_number': country_number,
                         'count': count,
-                        'paid': paid,
-                        'unpaid': unpaid,
-                        'revenue': revenue
+                        'paid': paid_sms, # Simplified for bot usage
+                        'unpaid': unpaid_sms,
+                        'revenue': revenue_sms
                     })
                 
                 result = {
@@ -183,43 +168,25 @@ class IVASSMSClient:
                     'revenue': revenue_sms,
                     'sms_details': sms_details
                 }
-                result['raw_response'] = html_content
-                logger.debug(f"Retrieved {len(sms_details)} SMS detail records: {sms_details}")
                 return result
-            logger.error(f"Failed to check OTPs. Status code: {response.status_code}, Response: {self.decompress_response(response)[:2000]}")
             return None
         except Exception as e:
             logger.error(f"Error checking OTPs: {e}")
             return None
 
     def get_sms_details(self, phone_range, from_date="", to_date=""):
-        if not self.logged_in:
-            logger.error("Not logged in")
-            return None
+        if not self.logged_in: return None
         
-        logger.debug(f"Fetching SMS details for range: {phone_range}, from {from_date} to {to_date}")
         try:
-            payload = {
-                '_token': self.csrf_token,
-                'start': from_date,
-                'end': to_date,
-                'range': phone_range
-            }
-            
+            payload = {'_token': self.csrf_token, 'start': from_date, 'end': to_date, 'range': phone_range}
             headers = {
-                'Accept': 'text/html, */*; q=0.01',
                 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
                 'X-Requested-With': 'XMLHttpRequest',
                 'Origin': self.base_url,
                 'Referer': f"{self.base_url}/portal/sms/received"
             }
             
-            response = self.scraper.post(
-                f"{self.base_url}/portal/sms/received/getsms/number",
-                data=payload,
-                headers=headers,
-                timeout=10
-            )
+            response = self.scraper.post(f"{self.base_url}/portal/sms/received/getsms/number", data=payload, headers=headers, timeout=10)
             
             if response.status_code == 200:
                 html_content = self.decompress_response(response)
@@ -228,66 +195,33 @@ class IVASSMSClient:
                 items = soup.select("div.card.card-body")
                 for item in items:
                     phone_number = item.select_one(".col-sm-4").text.strip()
-                    count = item.select_one(".col-3:nth-child(2) p").text.strip()
-                    paid = item.select_one(".col-3:nth-child(3) p").text.strip()
-                    unpaid = item.select_one(".col-3:nth-child(4) p").text.strip()
-                    revenue = item.select_one(".col-3:nth-child(5) p span.currency_cdr").text.strip()
-                    onclick = item.select_one(".col-sm-4").get('onclick', '')
-                    id_number = onclick.split("'")[3] if onclick else ''
-                    
-                    number_details.append({
-                        'phone_number': phone_number,
-                        'count': count,
-                        'paid': paid,
-                        'unpaid': unpaid,
-                        'revenue': revenue,
-                        'id_number': id_number
-                    })
-                logger.debug(f"Retrieved {len(number_details)} number details for range {phone_range}: {number_details}")
+                    # Ambil elemen lain jika perlu, untuk bot cukup phone number
+                    number_details.append({'phone_number': phone_number})
                 return number_details
-            logger.error(f"Failed to get SMS details for {phone_range}. Status code: {response.status_code}, Response: {self.decompress_response(response)[:2000]}")
             return None
         except Exception as e:
             logger.error(f"Error getting SMS details for {phone_range}: {e}")
             return None
 
     def get_otp_message(self, phone_number, phone_range, from_date="", to_date=""):
-        if not self.logged_in:
-            logger.error("Not logged in")
-            return None
+        if not self.logged_in: return None
         
-        logger.debug(f"Fetching OTP message for phone: {phone_number}, range: {phone_range}, from {from_date} to {to_date}")
         try:
-            payload = {
-                '_token': self.csrf_token,
-                'start': from_date,
-                'end': to_date,
-                'Number': phone_number,
-                'Range': phone_range
-            }
-            
+            payload = {'_token': self.csrf_token, 'start': from_date, 'end': to_date, 'Number': phone_number, 'Range': phone_range}
             headers = {
-                'Accept': 'text/html, */*; q=0.01',
                 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
                 'X-Requested-With': 'XMLHttpRequest',
                 'Origin': self.base_url,
                 'Referer': f"{self.base_url}/portal/sms/received"
             }
             
-            response = self.scraper.post(
-                f"{self.base_url}/portal/sms/received/getsms/number/sms",
-                data=payload,
-                headers=headers,
-                timeout=10
-            )
+            response = self.scraper.post(f"{self.base_url}/portal/sms/received/getsms/number/sms", data=payload, headers=headers, timeout=10)
             
             if response.status_code == 200:
                 html_content = self.decompress_response(response)
                 soup = BeautifulSoup(html_content, 'html.parser')
                 message = soup.select_one(".col-9.col-sm-6 p").text.strip() if soup.select_one(".col-9.col-sm-6 p") else None
-                logger.debug(f"Retrieved OTP message for {phone_number}: {message}")
                 return message
-            logger.error(f"Failed to get OTP message for {phone_number}. Status code: {response.status_code}, Response: {self.decompress_response(response)[:2000]}")
             return None
         except Exception as e:
             logger.error(f"Error getting OTP message for {phone_number}: {e}")
@@ -295,8 +229,6 @@ class IVASSMSClient:
 
     def get_all_otp_messages(self, sms_details, from_date="", to_date="", limit=None):
         all_otp_messages = []
-        
-        logger.debug(f"Processing {len(sms_details)} SMS details for OTP messages with limit {limit}")
         for detail in sms_details:
             phone_range = detail['country_number']
             number_details = self.get_sms_details(phone_range, from_date, to_date)
@@ -304,7 +236,6 @@ class IVASSMSClient:
             if number_details:
                 for number_detail in number_details:
                     if limit is not None and len(all_otp_messages) >= limit:
-                        logger.debug(f"Reached limit of {limit} OTP messages, stopping")
                         return all_otp_messages
                     phone_number = number_detail['phone_number']
                     otp_message = self.get_otp_message(phone_number, phone_range, from_date, to_date)
@@ -314,93 +245,41 @@ class IVASSMSClient:
                             'phone_number': phone_number,
                             'otp_message': otp_message
                         })
-                        logger.debug(f"Added OTP message for {phone_number}: {otp_message}")
-            else:
-                logger.warning(f"No number details found for range: {phone_range}")
-        
-        logger.debug(f"Collected {len(all_otp_messages)} OTP messages")
         return all_otp_messages
 
 app = Flask(__name__)
 client = IVASSMSClient()
 
-with app.app_context():
-    if not client.login_with_cookies():
-        logger.error("Failed to initialize client with cookies")
-
 @app.route('/')
 def welcome():
-    return jsonify({
-        'message': 'Welcome to the IVAS SMS API',
-        'status': 'API is alive',
-        'endpoints': {
-            '/sms': 'Get OTP messages for a specific date (format: DD/MM/YYYY) with optional limit. Example: /sms?date=01/05/2025&limit=10'
-        }
-    })
+    return jsonify({'message': 'IVAS SMS API + Telegram Bot Running', 'status': 'Online'})
 
 @app.route('/sms')
 def get_sms():
+    # Endpoint lama tetap bisa dipakai
     date_str = request.args.get('date')
-    limit = request.args.get('limit')
+    if not date_str: return jsonify({'error': 'Date required'}), 400
     
-    if not date_str:
-        return jsonify({
-            'error': 'Date parameter is required in DD/MM/YYYY format'
-        }), 400
-    
-    try:
-        parsed_date = datetime.strptime(date_str, '%d/%m/%Y') 
-        from_date = date_str
-        to_date = request.args.get('to_date', '')
-        if to_date:
-            datetime.strptime(to_date, '%d/%m/%Y')  
-    except ValueError:
-        return jsonify({
-            'error': 'Invalid date format. Use DD/MM/YYYY'
-        }), 400
-
-    if limit:
-        try:
-            limit = int(limit)
-            if limit <= 0:
-                return jsonify({
-                    'error': 'Limit must be a positive integer'
-                }), 400
-        except ValueError:
-            return jsonify({
-                'error': 'Limit must be a valid integer'
-            }), 400
-    else:
-        limit = None
-
     if not client.logged_in:
-        return jsonify({
-            'error': 'Client not authenticated'
-        }), 401
+        client.login_with_cookies()
+        
+    result = client.check_otps(from_date=date_str)
+    if not result: return jsonify({'error': 'Failed'}), 500
     
-    logger.debug(f"Fetching SMS for date range: {from_date} to {to_date or 'empty'} with limit {limit}")
-    result = client.check_otps(from_date=from_date, to_date=to_date)
-    
-    if not result:
-        return jsonify({
-            'error': 'Failed to fetch OTP data'
-        }), 500
-
-    otp_messages = client.get_all_otp_messages(result.get('sms_details', []), from_date=from_date, to_date=to_date, limit=limit)
-    
-    return jsonify({
-        'status': 'success',
-        'from_date': from_date,
-        'to_date': to_date or 'Not specified',
-        'limit': limit if limit is not None else 'Not specified',
-        'sms_stats': {
-            'count_sms': result['count_sms'],
-            'paid_sms': result['paid_sms'],
-            'unpaid_sms': result['unpaid_sms'],
-            'revenue': result['revenue']
-        },
-        'otp_messages': otp_messages
-    })
+    otp_messages = client.get_all_otp_messages(result.get('sms_details', []), from_date=date_str, limit=5)
+    return jsonify({'data': otp_messages})
 
 if __name__ == '__main__':
+    # --- MENJALANKAN BOT DI BACKGROUND SAAT SERVER START ---
+    with app.app_context():
+        if client.login_with_cookies():
+            print("✅ Login Berhasil. Menjalankan Bot Telegram...")
+            try:
+                telegram_bot.start_bot(client)
+            except Exception as e:
+                print(f"❌ Gagal menjalankan bot: {e}")
+        else:
+            print("❌ Gagal Login. Cek Cookies!")
+    # -------------------------------------------------------
+            
     app.run(host='0.0.0.0', port=5000, debug=False)
