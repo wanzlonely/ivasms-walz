@@ -4,3 +4,5 @@ beautifulsoup4
 cloudscraper
 brotli
 gunicorn
+pyTelegramBotAPI
+pycountry
