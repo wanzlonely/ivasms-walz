@@ -186,12 +186,11 @@ def handle_callback(call):
     elif call.data == "ignore":
         bot.answer_callback_query(call.id)
     elif call.data.startswith("get_"):
-        country = call.data.split("_")[1]
-        bot.answer_callback_query(call.id, f"Monitoring {country}...")
+        bot.answer_callback_query(call.id, "Monitoring...")
 
 def start_bot(client):
     try:
-        bot.remove_webhook()
+        bot.delete_webhook()
         time.sleep(1)
     except:
         pass
@@ -200,6 +199,6 @@ def start_bot(client):
     th.daemon = True
     th.start()
     
-    bt = threading.Thread(target=bot.infinity_polling)
+    bt = threading.Thread(target=bot.infinity_polling, kwargs={'timeout': 10, 'long_polling_timeout': 5})
     bt.daemon = True
     bt.start()
