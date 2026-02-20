@@ -6,16 +6,13 @@ import pycountry
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime
 
-# Ambil Token & Chat ID
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False) if TELEGRAM_TOKEN else None
 
-# Variable Global Penyimpanan Data
 live_sms_storage = {}
 
-# Database Manual Negara (Agar bendera akurat 100%)
 MANUAL_COUNTRY_MAP = {
     "Russian": "RU", "Russia": "RU", "USA": "US", "United States": "US",
     "UK": "GB", "United Kingdom": "GB", "England": "GB", "Vietnam": "VN",
@@ -39,7 +36,6 @@ MANUAL_COUNTRY_MAP = {
 }
 
 def resolve_country_info(raw_name):
-    """Mendapatkan Bendera dan Nama Negara"""
     clean_name = raw_name.split('(')[0].strip()
     code = MANUAL_COUNTRY_MAP.get(clean_name)
     
@@ -57,7 +53,6 @@ def resolve_country_info(raw_name):
     return "🌍", clean_name
 
 def detect_service(text):
-    """Mendeteksi jenis layanan dari isi pesan"""
     if not text: return "Any"
     text = text.lower()
     services = {
@@ -76,21 +71,16 @@ def detect_service(text):
     return "Others"
 
 def generate_keyboard(data):
-    """Membuat Tombol Menu"""
     markup = InlineKeyboardMarkup(row_width=1)
     
-    # Header Button (Info)
     markup.add(InlineKeyboardButton("🌍 Select your country:", callback_data="ignore"))
     
     if not data:
-        # Tampilkan Loading jika data belum ada
         markup.add(InlineKeyboardButton("⏳ Loading Data (Wait)...", callback_data="refresh"))
     else:
-        # Urutkan berdasarkan jumlah terbanyak
         sorted_items = sorted(data.items(), key=lambda x: x[1]['count'], reverse=True)
         
-        # Batasi 10-15 tombol agar tidak error telegram
-        for range_key, info in sorted_items[:15]:
+        for range_key, info in sorted_items[:20]:
             flag, name = resolve_country_info(range_key)
             service = info['service']
             count = info['count']
@@ -101,7 +91,6 @@ def generate_keyboard(data):
             except IndexError:
                 display_prefix = ""
             
-            # FORMAT: 🇩🇪 Germany WhatsApp (+49) - 1234
             btn_text = f"{flag} {name} {service} {display_prefix} - {count}"
             markup.add(InlineKeyboardButton(btn_text, callback_data=f"get_{name}"))
 
@@ -109,7 +98,6 @@ def generate_keyboard(data):
     return markup
 
 def monitor_task(client):
-    """Looping pengecekan website di background"""
     global live_sms_storage
     
     while True:
@@ -134,19 +122,16 @@ def monitor_task(client):
                     
                     svc = "Mixed"
                     
-                    # Cek apakah ada update data
                     prev_data = live_sms_storage.get(r_name)
                     prev_cnt = prev_data['count'] if prev_data else 0
                     
                     if cnt > prev_cnt:
-                        # Ambil detail pesan terbaru
                         nums = client.get_sms_details(r_name, from_date=date_now)
                         if nums:
                             top_num = nums[0]['phone_number']
                             msg_body = client.get_otp_message(top_num, r_name, from_date=date_now)
                             if msg_body:
                                 svc = detect_service(msg_body)
-                                # KIRIM NOTIFIKASI KE GRUP
                                 if TELEGRAM_CHAT_ID:
                                     flag, c_name = resolve_country_info(r_name)
                                     notif = (
@@ -155,8 +140,8 @@ def monitor_task(client):
                                     )
                                     try:
                                         bot.send_message(TELEGRAM_CHAT_ID, notif, parse_mode="HTML")
-                                    except Exception as e:
-                                        print(f"Gagal kirim ke grup: {e}")
+                                    except:
+                                        pass
                     elif prev_data:
                         svc = prev_data['service']
 
@@ -164,14 +149,12 @@ def monitor_task(client):
                 
                 live_sms_storage = temp_storage
             
-            time.sleep(8)
-        except Exception as e:
-            print(f"Monitor Error: {e}")
+            time.sleep(10)
+        except Exception:
             time.sleep(20)
 
 @bot.message_handler(commands=['start'])
 def send_menu(message):
-    # Caption persis gambar yang diminta
     caption = (
         "🕵️ <b>SPY X WALZ BOT</b> 🕵️\n\n"
         "🔔 <b>Egypt 🇪🇬 Price has increased Rt:0.11$</b> 💵\n🤑 🤑\n\n"
@@ -207,22 +190,16 @@ def handle_callback(call):
         bot.answer_callback_query(call.id, f"Monitoring {country}...")
 
 def start_bot(client):
-    # --- PENTING: HAPUS WEBHOOK LAMA ---
     try:
-        print("Mencoba menghapus Webhook lama...")
         bot.remove_webhook()
         time.sleep(1)
-        print("Webhook dihapus. Memulai Polling...")
-    except Exception as e:
-        print(f"Gagal hapus webhook (abaikan jika pertama kali): {e}")
-    # -----------------------------------
+    except:
+        pass
 
-    # Jalan Thread Monitoring
     th = threading.Thread(target=monitor_task, args=(client,))
     th.daemon = True
     th.start()
     
-    # Jalan Thread Bot Telegram
     bt = threading.Thread(target=bot.infinity_polling)
     bt.daemon = True
     bt.start()
