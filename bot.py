@@ -1,217 +1,210 @@
 import os
 import time
 import threading
-import logging
 import telebot
 import pycountry
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime
 
-# Environment Variables
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False) if TELEGRAM_TOKEN else None
-logger = logging.getLogger("TelegramBot")
 
-last_sms_state = {}
+live_sms_storage = {}
 
-# Mapping Service ke Singkatan Keren (Sesuai Gambar 1)
-SERVICE_MAP = {
-    "whatsapp": "WS",
-    "telegram": "TG",
-    "facebook": "FB", 
-    "instagram": "IG",
-    "tiktok": "TT",
-    "google": "GO",
-    "youtube": "YT",
-    "netflix": "NF",
-    "apple": "AP",
-    "amazon": "AM",
-    "shopee": "SP",
-    "lazada": "LZ",
-    "tokopedia": "TO",
-    "gojek": "GJ",
-    "grab": "GR",
-    "uber": "UB",
-    "discord": "DC",
-    "twitter": "TW",
-    "x": "TW",
-    "line": "LN",
-    "viber": "VB",
-    "wechat": "WC",
-    "imo": "IM",
-    "kakaotalk": "KT"
+MANUAL_COUNTRY_MAP = {
+    "Russian": "RU", "Russia": "RU", "USA": "US", "United States": "US",
+    "UK": "GB", "United Kingdom": "GB", "England": "GB", "Vietnam": "VN",
+    "Indonesia": "ID", "Malaysia": "MY", "Philippines": "PH", "Thailand": "TH",
+    "Myanmar": "MM", "Cambodia": "KH", "Laos": "LA", "China": "CN",
+    "India": "IN", "Pakistan": "PK", "Bangladesh": "BD", "Nepal": "NP",
+    "Sri Lanka": "LK", "Turkey": "TR", "Iran": "IR", "Iraq": "IQ",
+    "Saudi Arabia": "SA", "Yemen": "YE", "UAE": "AE", "Israel": "IL",
+    "Egypt": "EG", "Morocco": "MA", "Algeria": "DZ", "Tunisia": "TN",
+    "Libya": "LY", "Sudan": "SD", "Somalia": "SO", "Nigeria": "NG",
+    "Kenya": "KE", "South Africa": "ZA", "Ghana": "GH", "Ethiopia": "ET",
+    "Brazil": "BR", "Argentina": "AR", "Colombia": "CO", "Chile": "CL",
+    "Peru": "PE", "Venezuela": "VE", "Mexico": "MX", "Canada": "CA",
+    "Germany": "DE", "France": "FR", "Italy": "IT", "Spain": "ES",
+    "Netherlands": "NL", "Belgium": "BE", "Portugal": "PT", "Poland": "PL",
+    "Ukraine": "UA", "Romania": "RO", "Sweden": "SE", "Norway": "NO",
+    "Finland": "FI", "Denmark": "DK", "Ireland": "IE", "Switzerland": "CH",
+    "Austria": "AT", "Greece": "GR", "Czech": "CZ", "Hungary": "HU",
+    "Australia": "AU", "New Zealand": "NZ", "Fiji": "FJ", "Papua New Guinea": "PG",
+    "Afghanistan": "AF", "Albania": "AL", "Angola": "AO", "Armenia": "AM",
+    "Azerbaijan": "AZ", "Bahrain": "BH", "Belarus": "BY", "Bolivia": "BO",
+    "Bosnia": "BA", "Botswana": "BW", "Bulgaria": "BG", "Cameroon": "CM",
+    "Costa Rica": "CR", "Croatia": "HR", "Cuba": "CU", "Cyprus": "CY",
+    "Ecuador": "EC", "Estonia": "EE", "Georgia": "GE", "Guatemala": "GT",
+    "Haiti": "HT", "Honduras": "HN", "Iceland": "IS", "Jamaica": "JM",
+    "Jordan": "JO", "Kazakhstan": "KZ", "Kuwait": "KW", "Kyrgyzstan": "KG",
+    "Latvia": "LV", "Lebanon": "LB", "Lithuania": "LT", "Luxembourg": "LU",
+    "Macedonia": "MK", "Madagascar": "MG", "Maldives": "MV", "Malta": "MT",
+    "Moldova": "MD", "Mongolia": "MN", "Montenegro": "ME", "Mozambique": "MZ",
+    "Namibia": "NA", "Nicaragua": "NI", "Oman": "OM", "Panama": "PA",
+    "Paraguay": "PY", "Qatar": "QA", "Serbia": "RS", "Slovakia": "SK",
+    "Slovenia": "SI", "Syria": "SY", "Taiwan": "TW", "Tajikistan": "TJ",
+    "Tanzania": "TZ", "Uganda": "UG", "Uruguay": "UY", "Uzbekistan": "UZ",
+    "Zambia": "ZM", "Zimbabwe": "ZW"
 }
 
-def get_country_data(country_text):
-    """
-    Mengubah nama negara/range menjadi Bendera dan Kode ISO 2 huruf.
-    Contoh: "Russian (+7)" -> ("🇷🇺", "RU", "Russian")
-    """
-    clean_name = country_text.split('(')[0].strip()
+def resolve_country_info(raw_name):
+    clean_name = raw_name.split('(')[0].strip()
+    code = MANUAL_COUNTRY_MAP.get(clean_name)
     
-    # Manual Override untuk nama yang sering beda di panel SMS vs Library
-    manual_data = {
-        "Russian": ("🇷🇺", "RU"), "Russia": ("🇷🇺", "RU"),
-        "USA": ("🇺🇸", "US"), "United States": ("🇺🇸", "US"), "America": ("🇺🇸", "US"),
-        "UK": ("🇬🇧", "GB"), "United Kingdom": ("🇬🇧", "GB"), "England": ("🇬🇧", "GB"),
-        "Vietnam": ("🇻🇳", "VN"), "Indonesia": ("🇮🇩", "ID"),
-        "Malaysia": ("🇲🇾", "MY"), "Philippines": ("🇵🇭", "PH"),
-        "Thailand": ("🇹🇭", "TH"), "Myanmar": ("🇲🇲", "MM"),
-        "Cambodia": ("🇰🇭", "KH"), "Laos": ("🇱🇦", "LA"),
-        "Timor Leste": ("🇹🇱", "TL"), "Brunei": ("🇧🇳", "BN"),
-        "Singapore": ("🇸🇬", "SG"), "China": ("🇨🇳", "CN"),
-        "Hong Kong": ("🇭🇰", "HK"), "Taiwan": ("🇹🇼", "TW"),
-        "Japan": ("🇯🇵", "JP"), "Korea": ("🇰🇷", "KR"),
-        "India": ("🇮🇳", "IN"), "Pakistan": ("🇵🇰", "PK"),
-        "Bangladesh": ("🇧🇩", "BD"), "Nepal": ("🇳🇵", "NP"),
-        "Sri Lanka": ("🇱🇰", "LK"), "Turkey": ("🇹🇷", "TR"),
-        "Iran": ("🇮🇷", "IR"), "Iraq": ("🇮🇶", "IQ"),
-        "Saudi Arabia": ("🇸🇦", "SA"), "UAE": ("🇦🇪", "AE"),
-        "Egypt": ("🇪🇬", "EG"), "Morocco": ("🇲🇦", "MA"),
-        "Algeria": ("🇩🇿", "DZ"), "Tunisia": ("🇹🇳", "TN"),
-        "Nigeria": ("🇳🇬", "NG"), "Kenya": ("🇰🇪", "KE"),
-        "South Africa": ("🇿🇦", "ZA"), "Brazil": ("🇧🇷", "BR"),
-        "Argentina": ("🇦🇷", "AR"), "Colombia": ("🇨🇴", "CO"),
-        "Mexico": ("🇲🇽", "MX"), "Canada": ("🇨🇦", "CA"),
-        "Germany": ("🇩🇪", "DE"), "France": ("🇫🇷", "FR"),
-        "Italy": ("🇮🇹", "IT"), "Spain": ("🇪🇸", "ES"),
-        "Netherlands": ("🇳🇱", "NL"), "Belgium": ("🇧🇪", "BE"),
-        "Portugal": ("🇵🇹", "PT"), "Poland": ("🇵🇱", "PL"),
-        "Ukraine": ("🇺🇦", "UA"), "Sweden": ("🇸🇪", "SE")
+    if not code:
+        try:
+            matches = pycountry.countries.search_fuzzy(clean_name)
+            if matches:
+                code = matches[0].alpha_2
+        except Exception:
+            code = None
+
+    if code:
+        flag = chr(127462 + ord(code[0]) - 65) + chr(127462 + ord(code[1]) - 65)
+        return flag, clean_name
+    return "🌍", clean_name
+
+def detect_service(text):
+    if not text: return "Any"
+    text = text.lower()
+    services = {
+        "whatsapp": "WhatsApp", "telegram": "Telegram", "facebook": "Facebook",
+        "instagram": "Instagram", "tiktok": "TikTok", "google": "Google",
+        "youtube": "YouTube", "netflix": "Netflix", "apple": "Apple",
+        "amazon": "Amazon", "shopee": "Shopee", "gojek": "Gojek",
+        "grab": "Grab", "uber": "Uber", "discord": "Discord",
+        "twitter": "Twitter", "snapchat": "Snapchat", "linkedin": "LinkedIn",
+        "imo": "Imo", "line": "Line", "viber": "Viber", "kakaotalk": "KakaoTalk",
+        "wechat": "WeChat", "paypal": "PayPal", "wise": "Wise"
     }
+    for k, v in services.items():
+        if k in text:
+            return v
+    return "Others"
 
-    if clean_name in manual_data:
-        return manual_data[clean_name][0], manual_data[clean_name][1], clean_name
+def generate_keyboard(data):
+    markup = InlineKeyboardMarkup(row_width=1)
     
-    # Auto detect semua negara lain di bumi menggunakan pycountry
-    try:
-        search = pycountry.countries.search_fuzzy(clean_name)
-        if search:
-            code = search[0].alpha_2
-            flag = chr(127462 + ord(code[0]) - 65) + chr(127462 + ord(code[1]) - 65)
-            return flag, code, clean_name
-    except LookupError:
-        pass
+    header_btn = InlineKeyboardButton("🌍 Select your country:", callback_data="ignore")
+    markup.add(header_btn)
+    
+    if not data:
+        markup.add(InlineKeyboardButton("⏳ Loading Servers...", callback_data="refresh"))
+    else:
+        sorted_items = sorted(data.items(), key=lambda x: x[1]['count'], reverse=True)
+        
+        for range_key, info in sorted_items:
+            flag, name = resolve_country_info(range_key)
+            service = info['service']
+            count = info['count']
+            
+            try:
+                prefix = range_key.split('(')[1].split(')')[0]
+                display_prefix = f"({prefix})"
+            except IndexError:
+                display_prefix = ""
+            
+            btn_text = f"{flag} {name} {service} {display_prefix} - {count}"
+            markup.add(InlineKeyboardButton(btn_text, callback_data=f"get_{name}"))
 
-    return "🌍", "UN", clean_name # Default Unknown
-
-def get_service_code(message_text):
-    msg_lower = message_text.lower()
-    for name, code in SERVICE_MAP.items():
-        if name in msg_lower:
-            return code
-    return "Other"
-
-def create_markup():
-    markup = InlineKeyboardMarkup()
-    # Tombol sesuai gambar screenshot
-    btn1 = InlineKeyboardButton("‼️ Bot Pnl", url="https://t.me/") 
-    btn2 = InlineKeyboardButton("♻️ All Support", url="https://t.me/")
-    markup.row(btn1, btn2)
     return markup
 
-def send_notification(country_range, phone_number, otp_message):
-    try:
-        flag, iso_code, country_name = get_country_data(country_range)
-        service_code = get_service_code(otp_message)
-        
-        # Format sesuai Gambar 1: [Bendera] [ISO] • [Service] • [Negara] • [Nomor]
-        header = f"<b>{flag} {iso_code} • {service_code} • {country_name} • <code>{phone_number}</code></b>"
-        
-        final_text = (
-            f"{header}\n"
-            f"└ <code>{otp_message}</code>"
-        )
-
-        bot.send_message(
-            TELEGRAM_CHAT_ID,
-            final_text,
-            parse_mode="HTML",
-            reply_markup=create_markup()
-        )
-        return True
-    except Exception as e:
-        logger.error(f"Telegram Send Error: {e}")
-        return False
-
-def monitor_loop(client):
-    global last_sms_state
-    logger.info("Bot Monitor Engine Started")
+def monitor_task(client):
+    global live_sms_storage
     
     while True:
         try:
             if not client.logged_in:
                 client.login_with_cookies()
-                time.sleep(5)
+                time.sleep(3)
                 continue
 
-            today = datetime.now().strftime('%d/%m/%Y')
-            result = client.check_otps(from_date=today)
+            date_now = datetime.now().strftime('%d/%m/%Y')
+            result = client.check_otps(from_date=date_now)
             
-            if not result or 'sms_details' not in result:
-                time.sleep(10)
-                continue
-
-            current_details = result['sms_details']
-            
-            for item in current_details:
-                range_name = item['country_number'] # ex: Russian (+7)
-                try:
-                    current_count = int(item['count'])
-                except ValueError:
-                    current_count = 0
+            if result and 'sms_details' in result:
+                temp_storage = {}
                 
-                prev_count = last_sms_state.get(range_name, 0)
-                
-                # Jika ada pesan baru masuk
-                if current_count > prev_count:
-                    # Ambil list nomor dari range tersebut
-                    numbers = client.get_sms_details(range_name, from_date=today)
-                    if numbers:
-                        # Ambil nomor paling atas (terbaru)
-                        top_entry = numbers[0]
-                        phone = top_entry['phone_number']
-                        
-                        # Ambil isi pesannya
-                        msg = client.get_otp_message(phone, range_name, from_date=today)
-                        
-                        if msg:
-                            send_notification(range_name, phone, msg)
+                for item in result['sms_details']:
+                    r_name = item['country_number']
+                    try:
+                        cnt = int(item['count'])
+                    except:
+                        cnt = 0
                     
-                    # Update state
-                    last_sms_state[range_name] = current_count
+                    svc = "WhatsApp"
+                    
+                    prev_data = live_sms_storage.get(r_name)
+                    prev_cnt = prev_data['count'] if prev_data else 0
+                    
+                    if cnt > prev_cnt:
+                        nums = client.get_sms_details(r_name, from_date=date_now)
+                        if nums:
+                            top_num = nums[0]['phone_number']
+                            msg_body = client.get_otp_message(top_num, r_name, from_date=date_now)
+                            if msg_body:
+                                svc = detect_service(msg_body)
+                                if TELEGRAM_CHAT_ID:
+                                    flag, c_name = resolve_country_info(r_name)
+                                    notif = (
+                                        f"<b>{flag} {c_name} • {svc} • {top_num}</b>\n"
+                                        f"└ <code>{msg_body}</code>"
+                                    )
+                                    try:
+                                        bot.send_message(TELEGRAM_CHAT_ID, notif, parse_mode="HTML")
+                                    except:
+                                        pass
+                    elif prev_data:
+                        svc = prev_data['service']
+
+                    temp_storage[r_name] = {'count': cnt, 'service': svc}
+                
+                live_sms_storage = temp_storage
             
-            time.sleep(8) # Interval cek
+            time.sleep(10)
+        except Exception:
+            time.sleep(20)
 
-        except Exception as e:
-            logger.error(f"Monitor Loop Error: {e}")
-            time.sleep(30)
-
-@bot.message_handler(commands=['stats', 'start'])
-def stats_handler(message):
-    """Menampilkan statistik negara aktif (Mirip Gambar 4)"""
-    if not last_sms_state:
-        bot.reply_to(message, "⏳ Mengumpulkan data...")
-        return
-
-    sorted_stats = sorted(last_sms_state.items(), key=lambda x: x[1], reverse=True)
-    text = "📊 <b>Live Country Statistics</b>\n\n"
+@bot.message_handler(commands=['start'])
+def send_menu(message):
+    caption = (
+        "<b>Apa yang dapat bot ini lakukan?</b>\n\n"
+        "🔔 <b>Egypt 🇪🇬 Price has increased Rt:0.11$</b> 💵\n🤑 🤑\n\n"
+        "<b>All Country 📞 WS Sell BOT</b>\n"
+        "✔️ <b>Instant SELL BOT</b> 🤖\n"
+        "<u>https://t.me/wsotp200bot?start=u8166829424</u>\n"
+        "💎 <b>Minimum Withdraw 1$</b> 🌑\n"
+        "🔥 <b>Withdraw USDC 🌑 POL Address.</b> 🌐\n"
+        "<b>Egypt 🇪🇬 Now Work Speed UP</b> 🚀"
+    )
     
-    for range_name, count in sorted_stats[:25]: # Top 25 Negara
-        flag, _, clean_name = get_country_data(range_name)
-        text += f"{flag} <b>{clean_name}</b> : <code>{count}</code> SMS\n"
-        
-    bot.reply_to(message, text, parse_mode="HTML")
+    bot.send_message(
+        message.chat.id,
+        caption,
+        parse_mode="HTML",
+        reply_markup=generate_keyboard(live_sms_storage),
+        disable_web_page_preview=True
+    )
 
-def start_bot(client_instance):
-    # Thread untuk monitoring web
-    t = threading.Thread(target=monitor_loop, args=(client_instance,))
-    t.daemon = True
-    t.start()
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callback(call):
+    if call.data == "refresh":
+        bot.edit_message_reply_markup(
+            call.message.chat.id,
+            call.message.message_id,
+            reply_markup=generate_keyboard(live_sms_storage)
+        )
+    elif call.data.startswith("get_"):
+        country = call.data.split("_")[1]
+        bot.answer_callback_query(call.id, f"Opening {country}...")
+
+def start_bot(client):
+    th = threading.Thread(target=monitor_task, args=(client,))
+    th.daemon = True
+    th.start()
     
-    # Thread untuk merespon chat telegram
-    bot_thread = threading.Thread(target=bot.infinity_polling)
-    bot_thread.daemon = True
-    bot_thread.start()
+    bt = threading.Thread(target=bot.infinity_polling)
+    bt.daemon = True
+    bt.start()
