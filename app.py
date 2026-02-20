@@ -105,13 +105,10 @@ client = IVASSMSClient()
 
 @app.route('/')
 def home():
-    return jsonify({"status": "Bot Running", "login": client.logged_in})
+    return jsonify({"status": "Spy X Walz Bot Running", "login": client.logged_in})
 
 if __name__ == '__main__':
     with app.app_context():
         if client.login_with_cookies():
-            print("Login OK. Starting Bot...")
             telegram_bot.start_bot(client)
-        else:
-            print("Login Failed. Check Cookies.")
     app.run(host='0.0.0.0', port=5000)
