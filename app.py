@@ -108,9 +108,6 @@ def home():
     return jsonify({"status": "Spy X Walz Bot Running", "login": client.logged_in})
 
 if __name__ == '__main__':
-    with app.app_context():
-        if client.login_with_cookies():
-            telegram_bot.start_bot(client)
-    
+    telegram_bot.start_bot(client)
     port = int(os.environ.get("PORT", 8000))
     app.run(host='0.0.0.0', port=port)
